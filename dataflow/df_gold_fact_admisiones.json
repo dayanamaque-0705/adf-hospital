@@ -1,0 +1,81 @@
+{
+	"name": "df_gold_fact_admisiones",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "silver_admissions",
+						"type": "DatasetReference"
+					},
+					"name": "source1"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "gold_fact_admisiones",
+						"type": "DatasetReference"
+					},
+					"name": "sink1"
+				}
+			],
+			"transformations": [],
+			"scriptLines": [
+				"source(output(",
+				"          admission_id_bk as integer,",
+				"          paciente_key as integer,",
+				"          departamento_key as integer,",
+				"          diagnostico_key as integer,",
+				"          fecha_ingreso_key as integer,",
+				"          fecha_alta_key as integer,",
+				"          medico_id as integer,",
+				"          dias_estancia as integer,",
+				"          conteo_admisiones as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT\\n    a.admission_id AS admission_id_bk,\\n    dp.paciente_key,\\n    ddp.departamento_key,\\n    COALESCE(ddg.diagnostico_key, (SELECT TOP 1 diagnostico_key FROM gold.dim_diagnostico)) AS diagnostico_key,\\n    CAST(CONVERT(VARCHAR(8), a.admission_date, 112) AS INT) AS fecha_ingreso_key,\\n    CASE\\n        WHEN a.discharge_date IS NULL THEN NULL\\n        ELSE CAST(CONVERT(VARCHAR(8), a.discharge_date, 112) AS INT)\\n    END AS fecha_alta_key,\\n    a.attending_doctor_id AS medico_id,\\n    CASE\\n        WHEN a.discharge_date IS NULL THEN NULL\\n        ELSE DATEDIFF(DAY, a.admission_date, a.discharge_date)\\n    END AS dias_estancia,\\n    1 AS conteo_admisiones\\nFROM silver.admissions a\\nINNER JOIN gold.dim_paciente dp\\n    ON dp.patient_id_bk = a.patient_id\\nINNER JOIN gold.dim_departamento ddp\\n    ON ddp.nombre_departamento = LTRIM(RTRIM(a.department))\\nLEFT JOIN (\\n    SELECT\\n        admission_id,\\n        MIN(icd_code) AS icd_code,\\n        MIN(COALESCE(NULLIF(LTRIM(RTRIM(severity)), \\'\\'), \\'No especificada\\')) AS severity\\n    FROM silver.diagnoses\\n    GROUP BY admission_id\\n) d_adm\\n    ON d_adm.admission_id = a.admission_id\\nLEFT JOIN gold.dim_diagnostico ddg\\n    ON ddg.codigo_icd = d_adm.icd_code\\n   AND ddg.nivel_severidad = d_adm.severity',",
+				"     format: 'query') ~> source1",
+				"source1 sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          admision_key as long,",
+				"          admission_id_bk as integer,",
+				"          paciente_key as integer,",
+				"          departamento_key as integer,",
+				"          diagnostico_key as integer,",
+				"          fecha_ingreso_key as integer,",
+				"          fecha_alta_key as integer,",
+				"          medico_id as integer,",
+				"          dias_estancia as integer,",
+				"          conteo_admisiones as integer",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          admission_id_bk,",
+				"          paciente_key,",
+				"          departamento_key,",
+				"          diagnostico_key,",
+				"          fecha_ingreso_key,",
+				"          fecha_alta_key,",
+				"          medico_id,",
+				"          dias_estancia,",
+				"          conteo_admisiones",
+				"     )) ~> sink1"
+			]
+		}
+	}
+}
