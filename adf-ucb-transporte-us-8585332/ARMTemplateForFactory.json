@@ -160,6 +160,45 @@
 								"parameters": {},
 								"datasetParameters": {
 									"source1": {},
+									"source2": {},
+									"sink1": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "silver_billing",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "silver_diagnoses",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_silver_billing",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"source1": {},
+									"source2": {},
 									"sink1": {}
 								}
 							},
@@ -181,7 +220,8 @@
 				"[concat(variables('factoryId'), '/dataflows/df_silver_patients')]",
 				"[concat(variables('factoryId'), '/dataflows/df_silver_admissions')]",
 				"[concat(variables('factoryId'), '/linkedServices/ls_sql_db_hospital')]",
-				"[concat(variables('factoryId'), '/dataflows/df_silver_diagnoses')]"
+				"[concat(variables('factoryId'), '/dataflows/df_silver_diagnoses')]",
+				"[concat(variables('factoryId'), '/dataflows/df_silver_billing')]"
 			]
 		},
 		{
@@ -730,6 +770,13 @@
 								"type": "DatasetReference"
 							},
 							"name": "source1"
+						},
+						{
+							"dataset": {
+								"referenceName": "silver_admissions",
+								"type": "DatasetReference"
+							},
+							"name": "source2"
 						}
 					],
 					"sinks": [
@@ -753,6 +800,9 @@
 						},
 						{
 							"name": "split1"
+						},
+						{
+							"name": "exists1"
 						}
 					],
 					"scriptLines": [
@@ -767,14 +817,29 @@
 						"     validateSchema: false,",
 						"     isolationLevel: 'READ_UNCOMMITTED',",
 						"     format: 'table') ~> source1",
+						"source(output(",
+						"          admission_id as integer,",
+						"          patient_id as integer,",
+						"          admission_date as date,",
+						"          discharge_date as date,",
+						"          department as string,",
+						"          attending_doctor_id as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> source2",
 						"source1 derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
 						"          admission_id = toInteger(trim(admission_id))) ~> idsdiagnosticos",
 						"idsdiagnosticos derive(icd_code = iif(   isNull(icd_code) || trim(icd_code) == '' || upper(trim(icd_code)) == 'NULL',   toString(null()),   regexReplace(     upper(       regexReplace(         replace(trim(icd_code), '-', '.'),         '\\\\s*,\\\\s*',         ', '       )     ),     '\\\\b([A-Z]\\\\d{2})(\\\\d+)',     '$1.$2'   ) ),",
 						"          diagnosis_description = iif(   isNull(diagnosis_description) || trim(diagnosis_description) == '' || upper(trim(diagnosis_description)) == 'NULL',   toString(null()),   initCap(trim(diagnosis_description)) )) ~> codigodescripcion",
 						"codigodescripcion derive(severity = iif(   isNull(severity) || trim(severity) == '' || upper(trim(severity)) == 'NULL',   toString(null()),   case(     lower(trim(severity)) == 'mild', 'Mild',     lower(trim(severity)) == 'moderate', 'Moderate',     lower(trim(severity)) == 'severe', 'Severe',     lower(trim(severity)) == 'critical', 'Critical',     initCap(trim(severity))   ) )) ~> severidad",
-						"severidad split(!isNull(diagnosis_id) && !isNull(admission_id) && admission_id >= 1 && admission_id <= 1800 && !isNull(icd_code) && icd_code != '',",
+						"severidad split(!isNull(diagnosis_id) && !isNull(admission_id) && !isNull(icd_code) && icd_code != '',",
 						"     disjoint: false) ~> split1@(validos, nulls)",
-						"split1@validos sink(allowSchemaDrift: true,",
+						"split1@validos, source2 exists(split1@validos@admission_id == source2@admission_id,",
+						"     negate:false,",
+						"     broadcast: 'auto')~> exists1",
+						"exists1 sink(allowSchemaDrift: true,",
 						"     validateSchema: false,",
 						"     input(",
 						"          diagnosis_id as integer,",
@@ -803,6 +868,7 @@
 			},
 			"dependsOn": [
 				"[concat(variables('factoryId'), '/datasets/bronze_diagnoses')]",
+				"[concat(variables('factoryId'), '/datasets/silver_admissions')]",
 				"[concat(variables('factoryId'), '/datasets/silver_diagnoses')]"
 			]
 		},
@@ -909,6 +975,137 @@
 			"dependsOn": [
 				"[concat(variables('factoryId'), '/datasets/bronze_patients')]",
 				"[concat(variables('factoryId'), '/datasets/silver_patients')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_silver_billing')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "silver"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "bronze_billing",
+								"type": "DatasetReference"
+							},
+							"name": "source1"
+						},
+						{
+							"dataset": {
+								"referenceName": "silver_admissions",
+								"type": "DatasetReference"
+							},
+							"name": "source2"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "silver_billing",
+								"type": "DatasetReference"
+							},
+							"name": "sink1"
+						}
+					],
+					"transformations": [
+						{
+							"name": "idsmonto"
+						},
+						{
+							"name": "cargoestado"
+						},
+						{
+							"name": "fechacosto"
+						},
+						{
+							"name": "split1"
+						},
+						{
+							"name": "exists1"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          billing_id as string,",
+						"          admission_id as string,",
+						"          charge_type as string,",
+						"          amount as string,",
+						"          payment_status as string,",
+						"          payment_date as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> source1",
+						"source(output(",
+						"          admission_id as integer,",
+						"          patient_id as integer,",
+						"          admission_date as date,",
+						"          discharge_date as date,",
+						"          department as string,",
+						"          attending_doctor_id as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> source2",
+						"source1 derive(billing_id = toInteger(trim(billing_id)),",
+						"          admission_id = toInteger(trim(admission_id)),",
+						"          amount = iif(\r",
+						"  isNull(amount) || trim(amount) == '' || upper(trim(amount)) == 'NULL',\r",
+						"  toDecimal(null(), 12, 2),\r",
+						"  toDecimal(\r",
+						"    regexReplace(trim(amount), '[^0-9.-]', ''),\r",
+						"    12,\r",
+						"    2\r",
+						"  )\r",
+						")) ~> idsmonto",
+						"idsmonto derive(charge_type = iif(   isNull(charge_type) || trim(charge_type) == '' || upper(trim(charge_type)) == 'NULL',   toString(null()),   initCap(trim(charge_type)) ),",
+						"          payment_status = iif(   isNull(payment_status) || trim(payment_status) == '' || upper(trim(payment_status)) == 'NULL',   toString(null()),   case(     lower(trim(payment_status)) == 'paid', 'Paid',     lower(trim(payment_status)) == 'pending', 'Pending',     lower(trim(payment_status)) == 'unpaid', 'Unpaid',     lower(trim(payment_status)) == 'overdue', 'Overdue',     initCap(trim(payment_status))   ) )) ~> cargoestado",
+						"cargoestado derive(payment_date = iif(   isNull(payment_date) || trim(payment_date) == '' || upper(trim(payment_date)) == 'NULL',   toDate(null()),   iif(     year(       coalesce(         toDate(trim(payment_date), 'yyyy-MM-dd'),         toDate(trim(payment_date), 'MMMM dd, yyyy'),         toDate(trim(payment_date), 'dd-MMM-yyyy'),         toDate(trim(payment_date), 'MM/dd/yyyy'),         toDate(trim(payment_date), 'dd-MM-yyyy'),         toDate(trim(payment_date), 'MM-dd-yy')       )     ) < 1900,     toDate(null()),     coalesce(       toDate(trim(payment_date), 'yyyy-MM-dd'),       toDate(trim(payment_date), 'MMMM dd, yyyy'),       toDate(trim(payment_date), 'dd-MMM-yyyy'),       toDate(trim(payment_date), 'MM/dd/yyyy'),       toDate(trim(payment_date), 'dd-MM-yyyy'),       toDate(trim(payment_date), 'MM-dd-yy')     )   ) )) ~> fechacosto",
+						"fechacosto split(!isNull(billing_id) && !isNull(admission_id) && !isNull(charge_type) && charge_type != '' && !isNull(amount) && amount > 0 && !isNull(payment_status) && payment_status != '',",
+						"     disjoint: false) ~> split1@(validos, nulls)",
+						"split1@validos, source2 exists(split1@validos@admission_id == source2@admission_id,",
+						"     negate:false,",
+						"     broadcast: 'auto')~> exists1",
+						"exists1 sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          billing_id as integer,",
+						"          admission_id as integer,",
+						"          charge_type as string,",
+						"          amount as decimal(12,2),",
+						"          payment_status as string,",
+						"          payment_date as date",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          billing_id,",
+						"          admission_id,",
+						"          charge_type,",
+						"          amount,",
+						"          payment_status,",
+						"          payment_date",
+						"     )) ~> sink1"
+					]
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/bronze_billing')]",
+				"[concat(variables('factoryId'), '/datasets/silver_admissions')]",
+				"[concat(variables('factoryId'), '/datasets/silver_billing')]"
 			]
 		}
 	]
