@@ -13,6 +13,13 @@
 						"type": "DatasetReference"
 					},
 					"name": "source1"
+				},
+				{
+					"dataset": {
+						"referenceName": "silver_admissions",
+						"type": "DatasetReference"
+					},
+					"name": "source2"
 				}
 			],
 			"sinks": [
@@ -36,6 +43,9 @@
 				},
 				{
 					"name": "split1"
+				},
+				{
+					"name": "exists1"
 				}
 			],
 			"scriptLines": [
@@ -50,14 +60,29 @@
 				"     validateSchema: false,",
 				"     isolationLevel: 'READ_UNCOMMITTED',",
 				"     format: 'table') ~> source1",
+				"source(output(",
+				"          admission_id as integer,",
+				"          patient_id as integer,",
+				"          admission_date as date,",
+				"          discharge_date as date,",
+				"          department as string,",
+				"          attending_doctor_id as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> source2",
 				"source1 derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
 				"          admission_id = toInteger(trim(admission_id))) ~> idsdiagnosticos",
 				"idsdiagnosticos derive(icd_code = iif(   isNull(icd_code) || trim(icd_code) == '' || upper(trim(icd_code)) == 'NULL',   toString(null()),   regexReplace(     upper(       regexReplace(         replace(trim(icd_code), '-', '.'),         '\\\\s*,\\\\s*',         ', '       )     ),     '\\\\b([A-Z]\\\\d{2})(\\\\d+)',     '$1.$2'   ) ),",
 				"          diagnosis_description = iif(   isNull(diagnosis_description) || trim(diagnosis_description) == '' || upper(trim(diagnosis_description)) == 'NULL',   toString(null()),   initCap(trim(diagnosis_description)) )) ~> codigodescripcion",
 				"codigodescripcion derive(severity = iif(   isNull(severity) || trim(severity) == '' || upper(trim(severity)) == 'NULL',   toString(null()),   case(     lower(trim(severity)) == 'mild', 'Mild',     lower(trim(severity)) == 'moderate', 'Moderate',     lower(trim(severity)) == 'severe', 'Severe',     lower(trim(severity)) == 'critical', 'Critical',     initCap(trim(severity))   ) )) ~> severidad",
-				"severidad split(!isNull(diagnosis_id) && !isNull(admission_id) && admission_id >= 1 && admission_id <= 1800 && !isNull(icd_code) && icd_code != '',",
+				"severidad split(!isNull(diagnosis_id) && !isNull(admission_id) && !isNull(icd_code) && icd_code != '',",
 				"     disjoint: false) ~> split1@(validos, nulls)",
-				"split1@validos sink(allowSchemaDrift: true,",
+				"split1@validos, source2 exists(split1@validos@admission_id == source2@admission_id,",
+				"     negate:false,",
+				"     broadcast: 'auto')~> exists1",
+				"exists1 sink(allowSchemaDrift: true,",
 				"     validateSchema: false,",
 				"     input(",
 				"          diagnosis_id as integer,",
