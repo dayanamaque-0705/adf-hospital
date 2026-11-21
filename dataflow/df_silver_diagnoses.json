@@ -1,0 +1,87 @@
+{
+	"name": "df_silver_diagnoses",
+	"properties": {
+		"folder": {
+			"name": "silver"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "bronze_diagnoses",
+						"type": "DatasetReference"
+					},
+					"name": "source1"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "silver_diagnoses",
+						"type": "DatasetReference"
+					},
+					"name": "sink1"
+				}
+			],
+			"transformations": [
+				{
+					"name": "idsdiagnosticos"
+				},
+				{
+					"name": "codigodescripcion"
+				},
+				{
+					"name": "severidad"
+				},
+				{
+					"name": "split1"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          diagnosis_id as string,",
+				"          admission_id as string,",
+				"          icd_code as string,",
+				"          diagnosis_description as string,",
+				"          severity as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> source1",
+				"source1 derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
+				"          admission_id = toInteger(trim(admission_id))) ~> idsdiagnosticos",
+				"idsdiagnosticos derive(icd_code = iif(   isNull(icd_code) || trim(icd_code) == '' || upper(trim(icd_code)) == 'NULL',   toString(null()),   regexReplace(     upper(       regexReplace(         replace(trim(icd_code), '-', '.'),         '\\\\s*,\\\\s*',         ', '       )     ),     '\\\\b([A-Z]\\\\d{2})(\\\\d+)',     '$1.$2'   ) ),",
+				"          diagnosis_description = iif(   isNull(diagnosis_description) || trim(diagnosis_description) == '' || upper(trim(diagnosis_description)) == 'NULL',   toString(null()),   initCap(trim(diagnosis_description)) )) ~> codigodescripcion",
+				"codigodescripcion derive(severity = iif(   isNull(severity) || trim(severity) == '' || upper(trim(severity)) == 'NULL',   toString(null()),   case(     lower(trim(severity)) == 'mild', 'Mild',     lower(trim(severity)) == 'moderate', 'Moderate',     lower(trim(severity)) == 'severe', 'Severe',     lower(trim(severity)) == 'critical', 'Critical',     initCap(trim(severity))   ) )) ~> severidad",
+				"severidad split(!isNull(diagnosis_id) && !isNull(admission_id) && admission_id >= 1 && admission_id <= 1800 && !isNull(icd_code) && icd_code != '',",
+				"     disjoint: false) ~> split1@(validos, nulls)",
+				"split1@validos sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          diagnosis_id as integer,",
+				"          admission_id as integer,",
+				"          icd_code as string,",
+				"          diagnosis_description as string,",
+				"          severity as string",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          diagnosis_id,",
+				"          admission_id,",
+				"          icd_code,",
+				"          diagnosis_description,",
+				"          severity",
+				"     )) ~> sink1"
+			]
+		}
+	}
+}
